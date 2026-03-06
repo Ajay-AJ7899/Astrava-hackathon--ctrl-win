@@ -1,4 +1,9 @@
-// Simple in-memory store for hackathon demo
+// ─── Patient Store — MongoDB-backed via local Express server ─────────────────
+// Writes go to MongoDB immediately; reads use the in-memory snapshot for speed.
+// Call initPatients() once on app mount to hydrate from the database.
+
+export const DB_API = "http://localhost:3001/api";
+
 export interface LabRecord {
   date: string;
   test: string;
@@ -31,7 +36,9 @@ export interface Patient {
   status: "Awaiting Scan" | "Ready for Read" | "Completed" | "Rejected";
   chiefComplaint: string;
   clinicalNotes: string;
+  clinicalTrialNotes?: string;
   labRecords: LabRecord[];
+  scanType?: "xray" | "ct" | "mri";
   scanImage?: string;
   heatmapImage?: string;
   imageRisk?: number;
@@ -47,12 +54,20 @@ export interface Patient {
   completedAt?: Date;
 }
 
+// ─── Separate lab DB (in-memory additions not yet flushed to patient record) ─
 const labDatabase: Record<string, LabRecord[]> = {};
 
 export function addLabRecords(patientId: string, records: LabRecord[]) {
   labDatabase[patientId] = [...(labDatabase[patientId] || []), ...records];
+  // Also persist to MongoDB asynchronously
+  fetch(`${DB_API}/patients/${patientId}/labs`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ records }),
+  }).catch((err) => console.warn("MongoDB lab sync failed:", err));
 }
 
+// ─── Reasoning templates ─────────────────────────────────────────────────────
 const reasoningTemplates = {
   imageFindings: {
     high: [
@@ -109,7 +124,7 @@ const reasoningTemplates = {
 let feedbackLog: FeedbackEntry[] = [];
 let modelAccuracy = { total: 0, correct: 0, falsePositives: 0, falseNegatives: 0 };
 
-// Seed patients for demo
+// ─── In-memory reactive store ─────────────────────────────────────────────────
 const seedPatients: Patient[] = [
   {
     id: "PAT-001",
@@ -185,13 +200,12 @@ const seedPatients: Patient[] = [
   },
 ];
 
-// Use a frozen snapshot reference that only changes on mutation
 let patients: Patient[] = [...seedPatients];
 let patientsSnapshot: readonly Patient[] = Object.freeze([...patients]);
 let listeners: (() => void)[] = [];
+let dbConnected = false;
 
 function notify() {
-  // Create a new frozen snapshot so useSyncExternalStore sees the change
   patientsSnapshot = Object.freeze([...patients]);
   listeners.forEach((l) => l());
 }
@@ -203,29 +217,68 @@ export function subscribe(listener: () => void) {
   };
 }
 
-// Returns a stable reference — only changes when notify() is called
 export function getPatients(): readonly Patient[] {
   return patientsSnapshot;
 }
+
+export function isDbConnected(): boolean {
+  return dbConnected;
+}
+
+// ─── MongoDB hydration ────────────────────────────────────────────────────────
+// Called once from main.tsx to load patients from MongoDB on startup.
+export async function initPatients(): Promise<void> {
+  try {
+    const res = await fetch(`${DB_API}/patients`);
+    if (!res.ok) throw new Error(`Server responded ${res.status}`);
+    const data: Patient[] = await res.json();
+    if (data.length > 0) {
+      // Parse date strings back to Date objects
+      patients = data.map((p) => ({
+        ...p,
+        createdAt: new Date(p.createdAt),
+        completedAt: p.completedAt ? new Date(p.completedAt) : undefined,
+      }));
+      notify();
+      dbConnected = true;
+      console.log(`✅ Loaded ${patients.length} patients from MongoDB`);
+    } else {
+      // DB is empty — seed it with demo data
+      console.log("MongoDB empty — seeding demo patients...");
+      await Promise.all(
+        seedPatients.map((p) =>
+          fetch(`${DB_API}/patients`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(p),
+          })
+        )
+      );
+      dbConnected = true;
+      console.log("✅ Demo patients seeded to MongoDB");
+    }
+  } catch (err) {
+    console.warn("⚠️ MongoDB server unreachable — using in-memory store:", err);
+    dbConnected = false;
+  }
+}
+
+// ─── CRUD helpers ─────────────────────────────────────────────────────────────
 
 export function getLabRecords(patientId: string): LabRecord[] {
   const fromDb = labDatabase[patientId] || [];
   const patient = patients.find((p) => p.id === patientId);
   const fromPatient = patient?.labRecords || [];
-  // Merge both sources, deduplicate by test+date
   const seen = new Set<string>();
   const merged: LabRecord[] = [];
   for (const rec of [...fromPatient, ...fromDb]) {
     const key = `${rec.test}|${rec.date}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      merged.push(rec);
-    }
+    if (!seen.has(key)) { seen.add(key); merged.push(rec); }
   }
   return merged;
 }
 
-let counter = 3; // Start after seed patients
+let counter = 3;
 
 export function generatePatientId(): string {
   counter++;
@@ -235,11 +288,23 @@ export function generatePatientId(): string {
 export function addPatient(patient: Patient) {
   patients = [patient, ...patients];
   notify();
+  // Persist to MongoDB
+  fetch(`${DB_API}/patients`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patient),
+  }).catch((err) => console.warn("MongoDB addPatient failed:", err));
 }
 
 export function updatePatient(id: string, updates: Partial<Patient>) {
   patients = patients.map((p) => (p.id === id ? { ...p, ...updates } : p));
   notify();
+  // Persist to MongoDB
+  fetch(`${DB_API}/patients/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(updates),
+  }).catch((err) => console.warn("MongoDB updatePatient failed:", err));
 }
 
 export function getPatientsByStatus(status: Patient["status"]) {
@@ -257,41 +322,36 @@ export function generateAIReasoning(
 
   const imageLevel = imageRisk >= 70 ? "high" : imageRisk >= 40 ? "moderate" : "low";
 
-  const imageFindings = imageLevel === "high"
-    ? [pick(reasoningTemplates.imageFindings.high), pick(reasoningTemplates.imageFindings.moderate)]
-    : imageLevel === "moderate"
-    ? [pick(reasoningTemplates.imageFindings.moderate)]
-    : [pick(reasoningTemplates.imageFindings.low)];
+  const imageFindings =
+    imageLevel === "high"
+      ? [pick(reasoningTemplates.imageFindings.high), pick(reasoningTemplates.imageFindings.moderate)]
+      : imageLevel === "moderate"
+        ? [pick(reasoningTemplates.imageFindings.moderate)]
+        : [pick(reasoningTemplates.imageFindings.low)];
 
   const labFindings: string[] = [];
-  if (patient.labRecords.some((l) => l.flag === "critical")) {
+  if (patient.labRecords.some((l) => l.flag === "critical"))
     labFindings.push(pick(reasoningTemplates.labCorrelations.critical));
-  }
-  if (patient.labRecords.some((l) => l.flag === "abnormal")) {
+  if (patient.labRecords.some((l) => l.flag === "abnormal"))
     labFindings.push(pick(reasoningTemplates.labCorrelations.moderate));
-  }
-  if (labFindings.length === 0) {
+  if (labFindings.length === 0)
     labFindings.push(pick(reasoningTemplates.labCorrelations.normal));
-  }
 
-  const clinicalCorrelation = `Cross-referencing imaging (${imageRisk}% risk) with laboratory data (${labRisk}% risk) yields a combined urgency assessment. ${
-    feedbackAdjustment > 0
-      ? `Model confidence adjusted by ${feedbackAdjustment.toFixed(1)}% based on ${feedbackLog.length} previous radiologist feedback entries (RAG-enhanced).`
-      : "Initial prediction — no prior feedback data available for this pattern."
-  }`;
-
-  const recommendation = pick(reasoningTemplates.recommendations[priority]);
+  const clinicalCorrelation = `Cross-referencing imaging (${imageRisk}% risk) with laboratory data (${labRisk}% risk) yields a combined urgency assessment. ${feedbackAdjustment > 0
+    ? `Model confidence adjusted by ${feedbackAdjustment.toFixed(1)}% based on ${feedbackLog.length} previous radiologist feedback entries (RAG-enhanced).`
+    : "Initial prediction — no prior feedback data available for this pattern."
+    }`;
 
   return {
     imageFindings,
     labFindings,
     clinicalCorrelation,
-    recommendation,
+    recommendation: pick(reasoningTemplates.recommendations[priority]),
     confidence: Math.min(98, 70 + feedbackAdjustment + Math.random() * 15),
   };
 }
 
-export function submitFeedback(
+export async function submitFeedback(
   patientId: string,
   action: "approve" | "reject",
   notes: string,
@@ -322,28 +382,96 @@ export function submitFeedback(
     }
   }
 
-  updatePatient(patientId, {
-    status: action === "approve" ? "Completed" : "Rejected",
-    feedbackAction: action,
-    feedbackNotes: notes,
-    correctedPriority: correctedPriority || undefined,
+  const completedAt = new Date();
+
+  // ── Build the DoneReport payload ──────────────────────────────────────────
+  const doneReport = {
+    patientId: patient.id,
+    patientName: patient.name,
+    patientAge: patient.age,
+    chiefComplaint: patient.chiefComplaint,
+    clinicalNotes: patient.clinicalNotes,
+    clinicalTrialNotes: patient.clinicalTrialNotes,
+    labRecords: patient.labRecords,
+    scanType: patient.scanType,
+    scanImage: patient.scanImage,
+    imageRisk: patient.imageRisk,
+    labRisk: patient.labRisk,
+    urgencyScore: patient.urgencyScore,
+    priority: patient.priority,
+    aiReasoning: patient.aiReasoning,
+    radiologistAction: action,
+    radiologistNotes: notes,
     radiologistImpression: notes,
-    completedAt: new Date(),
-  });
+    correctedPriority: correctedPriority || null,
+    caseCreatedAt: patient.createdAt,
+    completedAt,
+  };
+
+  // ── Remove from in-memory active store immediately ────────────────────────
+  patients = patients.filter((p) => p.id !== patientId);
+  notify();
+
+  // ── Persist to done_reports (server also deletes from patients collection) -
+  try {
+    await fetch(`${DB_API}/done-reports`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(doneReport),
+    });
+  } catch (err) {
+    console.warn("MongoDB done-reports sync failed:", err);
+  }
 }
 
-export function getFeedbackLog() {
-  return [...feedbackLog];
+// ── Fetch completed reports from MongoDB done_reports collection ──────────────
+export async function getDoneReports(): Promise<DoneReport[]> {
+  try {
+    const res = await fetch(`${DB_API}/done-reports`);
+    if (!res.ok) throw new Error(`Server responded ${res.status}`);
+    const data = await res.json();
+    return data.map((r: DoneReport & { completedAt: string; caseCreatedAt: string }) => ({
+      ...r,
+      completedAt: r.completedAt ? new Date(r.completedAt) : undefined,
+      caseCreatedAt: r.caseCreatedAt ? new Date(r.caseCreatedAt) : undefined,
+    }));
+  } catch {
+    // Fallback: show nothing (graceful)
+    return [];
+  }
 }
 
-export function getModelAccuracy() {
-  return { ...modelAccuracy };
+// ── DoneReport type (mirrors Mongoose schema) ────────────────────────────────
+export interface DoneReport {
+  _id?: string;
+  patientId: string;
+  patientName: string;
+  patientAge?: number;
+  chiefComplaint?: string;
+  clinicalNotes?: string;
+  clinicalTrialNotes?: string;
+  labRecords?: LabRecord[];
+  scanType?: "xray" | "ct" | "mri";
+  scanImage?: string;
+  imageRisk?: number;
+  labRisk?: number;
+  urgencyScore?: number;
+  priority?: "CRITICAL" | "HIGH" | "NORMAL";
+  aiReasoning?: AIReasoning;
+  radiologistAction: "approve" | "reject";
+  radiologistNotes: string;
+  radiologistImpression?: string;
+  correctedPriority?: "CRITICAL" | "HIGH" | "NORMAL";
+  caseCreatedAt?: Date;
+  completedAt?: Date;
 }
+
+export function getFeedbackLog() { return [...feedbackLog]; }
+export function getModelAccuracy() { return { ...modelAccuracy }; }
 
 function getFeedbackAdjustment(): number {
   if (feedbackLog.length === 0) return 0;
-  const correctRate = modelAccuracy.correct / modelAccuracy.total;
-  return correctRate * 10;
+  return (modelAccuracy.correct / modelAccuracy.total) * 10;
 }
 
 export function getCompletedForDoctor(): Patient[] {
@@ -351,6 +479,3 @@ export function getCompletedForDoctor(): Patient[] {
     .filter((p) => p.status === "Completed" || p.status === "Rejected")
     .sort((a, b) => (b.urgencyScore || 0) - (a.urgencyScore || 0));
 }
-
-// Counter starts after seed data
-

@@ -2,12 +2,13 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   User, Search, Activity, Clock, CheckCircle, AlertTriangle,
-  FileText, FlaskConical, Brain, Shield, ArrowLeft, Download
+  FileText, FlaskConical, Brain, Shield, ArrowLeft, Download, Loader2
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { usePatients } from "@/hooks/usePatients";
 import type { Patient } from "@/store/patientStore";
+import { getDoneReports } from "@/store/patientStore";
 import { generatePatientPDF } from "@/lib/generatePDF";
 import humanBodyImg from "@/assets/human-body.png";
 
@@ -15,16 +16,61 @@ const PatientPortal = () => {
   const [patientId, setPatientId] = useState("");
   const [loggedInPatient, setLoggedInPatient] = useState<Patient | null>(null);
   const [error, setError] = useState("");
+  const [searching, setSearching] = useState(false);
   const allPatients = usePatients();
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
     const id = patientId.trim().toUpperCase();
+    if (!id) return;
+
+    // 1. Check active patients store (fast, in-memory)
     const found = allPatients.find((p) => p.id === id);
     if (found) {
       setLoggedInPatient(found);
       setError("");
-    } else {
-      setError("Patient ID not found. Please check and try again.");
+      return;
+    }
+
+    // 2. Not in active store — check done_reports in MongoDB
+    //    (patients are archived there after radiologist feedback)
+    setSearching(true);
+    try {
+      const reports = await getDoneReports();
+      const archived = reports.find((r) => r.patientId === id);
+      if (archived) {
+        // Map DoneReport back to a Patient-shaped object for the portal
+        const asPatient: Patient = {
+          id: archived.patientId,
+          name: archived.patientName,
+          age: archived.patientAge || 0,
+          status: archived.radiologistAction === "approve" ? "Completed" : "Rejected",
+          chiefComplaint: archived.chiefComplaint || "",
+          clinicalNotes: archived.clinicalNotes || "",
+          clinicalTrialNotes: archived.clinicalTrialNotes,
+          labRecords: archived.labRecords || [],
+          scanType: archived.scanType,
+          scanImage: archived.scanImage,
+          imageRisk: archived.imageRisk,
+          labRisk: archived.labRisk,
+          urgencyScore: archived.urgencyScore,
+          priority: archived.priority,
+          aiReasoning: archived.aiReasoning,
+          radiologistImpression: archived.radiologistImpression || archived.radiologistNotes,
+          feedbackAction: archived.radiologistAction,
+          feedbackNotes: archived.radiologistNotes,
+          correctedPriority: archived.correctedPriority,
+          createdAt: archived.caseCreatedAt || new Date(),
+          completedAt: archived.completedAt,
+        };
+        setLoggedInPatient(asPatient);
+        setError("");
+      } else {
+        setError("Patient ID not found. Please check and try again.");
+      }
+    } catch {
+      setError("Could not reach the server. Please try again.");
+    } finally {
+      setSearching(false);
     }
   };
 
@@ -88,9 +134,14 @@ const PatientPortal = () => {
 
               <Button
                 onClick={handleLogin}
+                disabled={searching}
                 className="w-full h-12 bg-[hsl(var(--neon-green))] text-[hsl(var(--background))] hover:bg-[hsl(var(--neon-green))]/90 font-semibold text-base"
               >
-                View My Records
+                {searching ? (
+                  <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Searching…</>
+                ) : (
+                  "View My Records"
+                )}
               </Button>
             </div>
 
@@ -213,23 +264,54 @@ const PatientPortal = () => {
             <h3 className="font-heading font-semibold flex items-center gap-2 mb-4 self-start">
               <Shield className="w-4 h-4 text-[hsl(var(--neon-violet))]" />
               Scan Region
-            </h3>
-            <div className="relative w-48 h-72 flex items-center justify-center">
-              <img
-                src={humanBodyImg}
-                alt="Human body anatomy scan"
-                className="w-full h-full object-contain rounded-lg opacity-80"
-              />
-              {/* Scan line animation */}
-              {latest.status === "Ready for Read" && (
-                <motion.div
-                  className="absolute left-0 right-0 h-1 rounded-full"
-                  style={{ background: "linear-gradient(90deg, transparent, hsl(var(--neon-cyan)), transparent)" }}
-                  animate={{ top: ["0%", "100%", "0%"] }}
-                  transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
-                />
+              {latest.scanType && (
+                <span className={`ml-1 px-2 py-0.5 rounded text-[10px] font-bold font-mono ${latest.scanType === "xray" ? "bg-neon-violet/20 text-neon-violet" :
+                    latest.scanType === "ct" ? "bg-neon-cyan/20 text-neon-cyan" :
+                      "bg-neon-green/20 text-neon-green"
+                  }`}>
+                  {latest.scanType === "xray" ? "X-RAY" : latest.scanType === "ct" ? "CT" : "MRI"}
+                </span>
               )}
-            </div>
+            </h3>
+
+            {latest.scanImage ? (
+              // Real scan uploaded by the technician
+              <div className="relative w-full">
+                <img
+                  src={latest.scanImage}
+                  alt="Patient scan"
+                  className="w-full max-h-64 object-contain rounded-xl bg-black/40 border border-border/30"
+                />
+                {latest.status === "Ready for Read" && (
+                  <motion.div
+                    className="absolute left-0 right-0 h-0.5 rounded-full pointer-events-none"
+                    style={{ background: "linear-gradient(90deg, transparent, hsl(var(--neon-cyan)), transparent)" }}
+                    animate={{ top: ["0%", "100%", "0%"] }}
+                    transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+                  />
+                )}
+              </div>
+            ) : (
+              // Fallback — no scan uploaded yet
+              <div className="relative w-48 h-72 flex items-center justify-center">
+                <img
+                  src={humanBodyImg}
+                  alt="Human body anatomy scan"
+                  className="w-full h-full object-contain rounded-lg opacity-80"
+                />
+                {latest.status === "Ready for Read" && (
+                  <motion.div
+                    className="absolute left-0 right-0 h-1 rounded-full"
+                    style={{ background: "linear-gradient(90deg, transparent, hsl(var(--neon-cyan)), transparent)" }}
+                    animate={{ top: ["0%", "100%", "0%"] }}
+                    transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+                  />
+                )}
+                <p className="absolute bottom-0 text-xs text-muted-foreground/50 text-center">
+                  Scan not yet available
+                </p>
+              </div>
+            )}
           </motion.div>
 
           {/* Lab Records */}
@@ -251,11 +333,10 @@ const PatientPortal = () => {
                     <div className="flex items-center gap-2">
                       <span className="font-mono">{lab.result}</span>
                       {lab.flag && (
-                        <span className={`text-xs px-2 py-0.5 rounded-full ${
-                          lab.flag === "critical" ? "bg-destructive/10 text-destructive" :
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${lab.flag === "critical" ? "bg-destructive/10 text-destructive" :
                           lab.flag === "abnormal" ? "bg-[hsl(var(--neon-orange))]/10 text-[hsl(var(--neon-orange))]" :
-                          "bg-[hsl(var(--neon-green))]/10 text-[hsl(var(--neon-green))]"
-                        }`}>
+                            "bg-[hsl(var(--neon-green))]/10 text-[hsl(var(--neon-green))]"
+                          }`}>
                           {lab.flag}
                         </span>
                       )}
