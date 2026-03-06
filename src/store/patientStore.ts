@@ -32,6 +32,7 @@ export interface Patient {
   chiefComplaint: string;
   clinicalNotes: string;
   labRecords: LabRecord[];
+  scanType?: "xray" | "ct";
   scanImage?: string;
   heatmapImage?: string;
   imageRisk?: number;
