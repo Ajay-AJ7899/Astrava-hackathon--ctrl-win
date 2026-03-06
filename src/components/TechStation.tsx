@@ -1,12 +1,12 @@
 import { useState, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Monitor, Upload, Zap, ImageIcon, Clock, User, FlaskConical, Plus, Trash2, Activity, Scan } from "lucide-react";
+import { Monitor, Upload, Zap, ImageIcon, Clock, User, FlaskConical, Plus, Trash2, Activity, Scan, BrainCircuit, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { usePatientsByStatus } from "@/hooks/usePatients";
 import { usePatients } from "@/hooks/usePatients";
-import { updatePatient, generateAIReasoning, addLabRecords, type LabRecord } from "@/store/patientStore";
+import { updatePatient, addLabRecords, type LabRecord } from "@/store/patientStore";
 import { toast } from "sonner";
 
 const API_BASE = "http://192.168.137.1:8000/api";
@@ -17,7 +17,7 @@ interface LabEntry {
   flag: "normal" | "abnormal" | "critical";
 }
 
-type ScanType = "xray" | "ct";
+type ScanType = "xray" | "ct" | "mri";
 
 const TechStation = () => {
   const pendingPatients = usePatientsByStatus("Awaiting Scan");
@@ -28,6 +28,7 @@ const TechStation = () => {
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [scanType, setScanType] = useState<ScanType>("xray");
+  const [clinicalTrialNotes, setClinicalTrialNotes] = useState("");
 
   // Lab report state
   const [labPatientId, setLabPatientId] = useState("");
@@ -117,18 +118,31 @@ const TechStation = () => {
     setIsProcessing(true);
 
     try {
-      // Build lab_notes string from existing lab records
-      const labNotes = patient.labRecords.length > 0
+      // Build lab_notes string from existing lab records + clinical trial notes
+      const labBase = patient.labRecords.length > 0
         ? patient.labRecords.map((l) => `${l.test}: ${l.result}${l.flag && l.flag !== "normal" ? ` (${l.flag})` : ""}`).join(", ")
         : patient.clinicalNotes || "No lab data available.";
+      const labNotes = clinicalTrialNotes.trim()
+        ? `${labBase}. Clinical trial notes: ${clinicalTrialNotes.trim()}`
+        : labBase;
 
       // Build FormData
       const formData = new FormData();
       formData.append("patient_name", patient.name);
       formData.append("lab_notes", labNotes);
 
-      const endpoint = scanType === "xray" ? "/pneumonia-xray" : "/ct-scan";
-      const fileField = scanType === "xray" ? "xray_file" : "ct_file";
+      // Route to appropriate model endpoint
+      let endpoint = "/pneumonia-xray";
+      let fileField = "xray_file";
+
+      if (scanType === "ct") {
+        endpoint = "/ct-scan";
+        fileField = "ct_file";
+      } else if (scanType === "mri") {
+        endpoint = "/brain-mri";
+        fileField = "mri_file";
+      }
+
       formData.append(fileField, uploadedFile);
 
       const response = await fetch(`${API_BASE}${endpoint}`, {
@@ -153,26 +167,57 @@ const TechStation = () => {
       if (score >= 0.7) priority = "CRITICAL";
       else if (score >= 0.45) priority = "HIGH";
 
-      // Build AI reasoning using the real flags from the API
-      const baseReasoning = generateAIReasoning(patient, imageRisk, labRisk, priority);
+      // ── Build AI reasoning purely from real API data — no templates, no splitting ─
       const criticalFlags: string[] = data.critical_flags ?? [];
+      const apiStatus: string = data.status ?? "";
+
+      // ALL critical_flags are image-model outputs → show exactly as-is under Image Findings
+      const imageFindings: string[] =
+        criticalFlags.length > 0
+          ? criticalFlags.map((f: string) => f)   // raw flag text, no prefix
+          : [
+            imageRisk >= 60
+              ? "Significant anomaly detected — see scan image for visual assessment"
+              : imageRisk >= 30
+                ? "Mild anomaly detected — further clinical correlation recommended"
+                : "No significant imaging anomaly detected",
+          ];
+
+      // Lab findings come from the patient's actual lab records, not the image model
+      const labFindings: string[] =
+        patient.labRecords.length > 0
+          ? patient.labRecords
+            .filter((l) => l.flag === "critical" || l.flag === "abnormal")
+            .map((l) => `${l.test}: ${l.result} (${l.flag})`)
+          : [];
+
+      if (labFindings.length === 0) {
+        labFindings.push(
+          labRisk >= 60
+            ? "Elevated lab severity score — review individual lab results"
+            : "No significant lab abnormalities"
+        );
+      }
+
+      const recommendation = apiStatus
+        ? `${apiStatus}. Priority: ${priority} (urgency ${urgencyScore}%).`
+        : `Priority: ${priority} (urgency ${urgencyScore}%).`;
 
       const aiReasoning = {
-        ...baseReasoning,
-        labFindings: criticalFlags.length > 0
-          ? criticalFlags.map((f: string) => `⚑ ${f}`)
-          : baseReasoning.labFindings,
-        recommendation: data.status
-          ? `${data.status}. ${baseReasoning.recommendation}`
-          : baseReasoning.recommendation,
-        confidence: Math.round(data.image_anomaly_confidence ?? baseReasoning.confidence),
+        imageFindings,
+        labFindings,
+        clinicalCorrelation: `Image anomaly: ${imageRisk}% | Lab severity: ${labRisk}% | Urgency: ${urgencyScore}% | Scan: ${scanType?.toUpperCase()}`,
+        recommendation,
+        confidence: Math.round(data.image_anomaly_confidence ?? imageRisk),
       };
+
 
       updatePatient(selectedPatient, {
         status: "Ready for Read",
         scanImage: uploadedImage,
         heatmapImage: uploadedImage,
         scanType,
+        clinicalTrialNotes: clinicalTrialNotes.trim() || undefined,
         imageRisk,
         labRisk,
         urgencyScore,
@@ -185,6 +230,7 @@ const TechStation = () => {
       setSelectedPatient(null);
       setUploadedImage(null);
       setUploadedFile(null);
+      setClinicalTrialNotes("");
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Unknown error";
       toast.error(`Analysis failed: ${message}`);
@@ -235,8 +281,8 @@ const TechStation = () => {
                   key={p.id}
                   onClick={() => setSelectedPatient(p.id)}
                   className={`w-full text-left glass rounded-xl p-4 transition-all duration-200 ${selectedPatient === p.id
-                      ? "border-neon-violet/50 neon-glow-violet"
-                      : "hover:border-border/60"
+                    ? "border-neon-violet/50 neon-glow-violet"
+                    : "hover:border-border/60"
                     }`}
                 >
                   <div className="flex items-center gap-3">
@@ -277,8 +323,8 @@ const TechStation = () => {
                   <button
                     onClick={() => setScanType("xray")}
                     className={`flex items-center gap-2 px-5 py-2.5 text-sm font-medium transition-all duration-200 ${scanType === "xray"
-                        ? "bg-neon-violet/20 text-neon-violet border-r border-neon-violet/30"
-                        : "bg-muted/20 text-muted-foreground border-r border-border/50 hover:bg-muted/40"
+                      ? "bg-neon-violet/20 text-neon-violet border-r border-neon-violet/30"
+                      : "bg-muted/20 text-muted-foreground border-r border-border/50 hover:bg-muted/40"
                       }`}
                   >
                     <Activity className="w-4 h-4" />
@@ -286,31 +332,59 @@ const TechStation = () => {
                   </button>
                   <button
                     onClick={() => setScanType("ct")}
-                    className={`flex items-center gap-2 px-5 py-2.5 text-sm font-medium transition-all duration-200 ${scanType === "ct"
-                        ? "bg-neon-cyan/20 text-neon-cyan"
-                        : "bg-muted/20 text-muted-foreground hover:bg-muted/40"
+                    className={`flex items-center gap-2 px-5 py-2.5 text-sm font-medium transition-all duration-200 border-r ${scanType === "ct"
+                      ? "bg-neon-cyan/20 text-neon-cyan border-neon-cyan/30"
+                      : "bg-muted/20 text-muted-foreground border-border/50 hover:bg-muted/40"
                       }`}
                   >
                     <Scan className="w-4 h-4" />
                     CT Scan
                   </button>
+                  <button
+                    onClick={() => setScanType("mri")}
+                    className={`flex items-center gap-2 px-5 py-2.5 text-sm font-medium transition-all duration-200 ${scanType === "mri"
+                      ? "bg-neon-green/20 text-neon-green"
+                      : "bg-muted/20 text-muted-foreground hover:bg-muted/40"
+                      }`}
+                  >
+                    <BrainCircuit className="w-4 h-4" />
+                    MRI
+                  </button>
                 </div>
                 <p className="text-xs text-muted-foreground mt-1.5">
                   {scanType === "xray"
                     ? "ViT model — Pneumonia detection (chest X-ray)"
-                    : "Swin Transformer — Lung cancer detection (CT scan, 88.5% accuracy)"}
+                    : scanType === "ct"
+                      ? "Swin Transformer — Lung cancer detection (CT scan, 88.5% accuracy)"
+                      : "Structural analysis — Brain / musculoskeletal MRI"}
                 </p>
               </div>
+
+              {/* Clinical Trial Notes */}
+              <div className="mb-4">
+                <label className="text-sm text-muted-foreground mb-1.5 flex items-center gap-1.5">
+                  <FileText className="w-3.5 h-3.5" />
+                  Clinical Trial Notes
+                  <span className="text-xs opacity-50 ml-1">(optional)</span>
+                </label>
+                <Input
+                  value={clinicalTrialNotes}
+                  onChange={(e) => setClinicalTrialNotes(e.target.value)}
+                  placeholder="e.g. Patient enrolled in Trial NCT-2024-0312, received dose 2 of 4"
+                  className="bg-muted/30 border-border/50 focus:border-neon-violet/50 text-sm"
+                />
+              </div>
+
 
               <div
                 onDrop={handleDrop}
                 onDragOver={handleDragOver}
                 onDragLeave={() => setIsDragging(false)}
                 className={`relative border-2 border-dashed rounded-xl transition-all duration-300 ${isDragging
-                    ? "border-neon-violet bg-neon-violet/5"
-                    : uploadedImage
-                      ? "border-neon-green/30"
-                      : "border-border/50 hover:border-neon-violet/30"
+                  ? "border-neon-violet bg-neon-violet/5"
+                  : uploadedImage
+                    ? "border-neon-green/30"
+                    : "border-border/50 hover:border-neon-violet/30"
                   } ${uploadedImage ? "p-4" : "p-12"}`}
               >
                 {uploadedImage ? (
@@ -385,8 +459,8 @@ const TechStation = () => {
                 <p className="text-xs text-muted-foreground text-center mt-2">
                   Selected: {pendingPatients.find((p) => p.id === selectedPatient)?.name || selectedPatient}
                   {" • "}
-                  <span className={scanType === "xray" ? "text-neon-violet" : "text-neon-cyan"}>
-                    {scanType === "xray" ? "X-ray (Pneumonia)" : "CT Scan (Lung Cancer)"}
+                  <span className={scanType === "xray" ? "text-neon-violet" : scanType === "ct" ? "text-neon-cyan" : "text-neon-green"}>
+                    {scanType === "xray" ? "X-ray (Pneumonia)" : scanType === "ct" ? "CT Scan (Lung Cancer)" : "MRI (Structural)"}
                   </span>
                 </p>
               )}

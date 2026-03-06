@@ -184,17 +184,15 @@ const RadiologistDashboard = () => {
                 <button
                   key={p.id}
                   onClick={() => { setSelectedId(p.id); setImpression(""); setShowHeatmap(false); setShowFeedbackPanel(false); }}
-                  className={`w-full text-left rounded-xl p-3 transition-all duration-200 ${
-                    selected?.id === p.id
-                      ? "glass-strong border-neon-magenta/50 neon-glow-magenta"
-                      : "glass hover:border-border/60"
-                  } ${
-                    p.priority === "CRITICAL"
+                  className={`w-full text-left rounded-xl p-3 transition-all duration-200 ${selected?.id === p.id
+                    ? "glass-strong border-neon-magenta/50 neon-glow-magenta"
+                    : "glass hover:border-border/60"
+                    } ${p.priority === "CRITICAL"
                       ? "priority-critical"
                       : p.priority === "HIGH"
-                      ? "priority-high"
-                      : ""
-                  }`}
+                        ? "priority-high"
+                        : ""
+                    }`}
                 >
                   <div className="flex items-center justify-between mb-1">
                     <span className="font-medium text-sm truncate">{p.name}</span>
@@ -294,27 +292,13 @@ const RadiologistDashboard = () => {
                 <div className="space-y-3 text-xs">
                   <div>
                     <p className="text-muted-foreground uppercase tracking-wider mb-1 flex items-center gap-1">
-                      <Eye className="w-3 h-3" /> Image Findings
+                      <Eye className="w-3 h-3" /> Image Findings (from API critical_flags)
                     </p>
                     <ul className="space-y-1">
-                      {selected.aiReasoning.imageFindings.map((f, i) => (
+                      {[...selected.aiReasoning.imageFindings, ...selected.aiReasoning.labFindings].map((f, i) => (
                         <li key={i} className="flex items-start gap-2">
                           <span className="text-neon-cyan mt-0.5">•</span>
-                          <span>{f}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-
-                  <div>
-                    <p className="text-muted-foreground uppercase tracking-wider mb-1 flex items-center gap-1">
-                      <TrendingUp className="w-3 h-3" /> Lab Correlation
-                    </p>
-                    <ul className="space-y-1">
-                      {selected.aiReasoning.labFindings.map((f, i) => (
-                        <li key={i} className="flex items-start gap-2">
-                          <span className="text-neon-violet mt-0.5">•</span>
-                          <span>{f}</span>
+                          <span>{f.replace(/^[⚑▲⚠]\s*/, "")}</span>
                         </li>
                       ))}
                     </ul>
@@ -325,10 +309,9 @@ const RadiologistDashboard = () => {
                     <p className="text-foreground/80">{selected.aiReasoning.clinicalCorrelation}</p>
                   </div>
 
-                  <div className={`rounded-lg p-2 ${
-                    selected.priority === "CRITICAL" ? "priority-critical" :
-                    selected.priority === "HIGH" ? "priority-high" : "priority-normal"
-                  }`}>
+                  <div className={`rounded-lg p-2 ${selected.priority === "CRITICAL" ? "priority-critical" :
+                      selected.priority === "HIGH" ? "priority-high" : "priority-normal"
+                    }`}>
                     <p className="text-muted-foreground uppercase tracking-wider mb-1">Recommendation</p>
                     <p className="font-medium">{selected.aiReasoning.recommendation}</p>
                   </div>
@@ -362,10 +345,9 @@ const RadiologistDashboard = () => {
                   </div>
                   <div className="glass rounded-xl p-3 text-center">
                     <p className="text-xs text-muted-foreground mb-1">Priority</p>
-                    <p className={`text-2xl font-heading font-bold ${
-                      selected.priority === "CRITICAL" ? "text-destructive" :
+                    <p className={`text-2xl font-heading font-bold ${selected.priority === "CRITICAL" ? "text-destructive" :
                       selected.priority === "HIGH" ? "text-neon-orange" : "text-neon-green"
-                    }`}>
+                      }`}>
                       {selected.urgencyScore}%
                     </p>
                   </div>
@@ -399,9 +381,8 @@ const RadiologistDashboard = () => {
                       <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Lab Results</p>
                       <div className="space-y-1">
                         {selected.labRecords.map((rec, i) => (
-                          <div key={i} className={`flex items-center justify-between text-xs rounded-lg p-2 ${
-                            rec.flag === "critical" ? "priority-critical" : rec.flag === "abnormal" ? "priority-high" : "glass"
-                          }`}>
+                          <div key={i} className={`flex items-center justify-between text-xs rounded-lg p-2 ${rec.flag === "critical" ? "priority-critical" : rec.flag === "abnormal" ? "priority-high" : "glass"
+                            }`}>
                             <span className="font-medium">{rec.test}</span>
                             <span className="font-mono">{rec.result}</span>
                           </div>
@@ -469,13 +450,12 @@ const RadiologistDashboard = () => {
                           <button
                             key={p}
                             onClick={() => setCorrectedPriority(p)}
-                            className={`flex-1 text-xs py-2 rounded-lg border transition-all ${
-                              correctedPriority === p
-                                ? p === "CRITICAL" ? "border-destructive bg-destructive/10 text-destructive font-bold"
-                                  : p === "HIGH" ? "border-neon-orange bg-neon-orange/10 text-neon-orange font-bold"
+                            className={`flex-1 text-xs py-2 rounded-lg border transition-all ${correctedPriority === p
+                              ? p === "CRITICAL" ? "border-destructive bg-destructive/10 text-destructive font-bold"
+                                : p === "HIGH" ? "border-neon-orange bg-neon-orange/10 text-neon-orange font-bold"
                                   : "border-neon-green bg-neon-green/10 text-neon-green font-bold"
-                                : "border-border/50 text-muted-foreground hover:border-border"
-                            }`}
+                              : "border-border/50 text-muted-foreground hover:border-border"
+                              }`}
                           >
                             {p}
                           </button>
