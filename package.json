@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
+  "type": "module",
   "dependencies": {
     "abab": "^2.0.6",
     "accepts": "^2.0.0",
@@ -399,7 +400,10 @@
     "concurrently": "^9.2.1"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "concurrently -n \"react,node,python\" -c \"cyan,magenta,yellow\" \"npm run dev:frontend\" \"npm run dev:server\" \"npm run dev:backend\"",
+    "dev:frontend": "cd frontend && npm run dev",
+    "dev:server": "node server/index.js",
+    "dev:backend": "cd backend && uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
   },
   "repository": {
     "type": "git",
@@ -408,7 +412,6 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
   "bugs": {
     "url": "https://github.com/Ajay-AJ7899/Astrava-hackathon--ctrl-win/issues"
   },
