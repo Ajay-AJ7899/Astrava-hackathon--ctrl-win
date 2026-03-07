@@ -54,7 +54,7 @@ const LandingPage = () => {
           <div className="text-[10px] text-neon-cyan uppercase tracking-widest mb-1 font-mono">Structural Analysis</div>
           <div className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-neon-cyan animate-pulse" />
-            <span className="text-sm font-medium">Genomic Pattern Match</span>
+            <span className="text-sm font-medium">Priority Based </span>
           </div>
         </motion.div>
 
@@ -65,7 +65,7 @@ const LandingPage = () => {
           className="absolute right-[15%] bottom-[35%] glass rounded-xl px-4 py-3 z-20 border-l-2 border-l-neon-violet border-t-0 border-r-0 border-b-0 backdrop-blur-md bg-black/40"
         >
           <div className="text-[10px] text-neon-violet uppercase tracking-widest mb-1 font-mono">AI Accuracy</div>
-          <div className="text-2xl font-heading font-bold text-white">99.2%</div>
+          <div className="text-2xl font-heading font-bold text-white">95.2%</div>
         </motion.div>
       </div>
 
