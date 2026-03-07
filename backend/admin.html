@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MedScan API Usage Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .glass-panel {
+            background: rgba(31, 41, 55, 0.7);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(75, 85, 99, 0.4);
+        }
+
+        .status-dot {
+            height: 10px;
+            width: 10px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .status-success {
+            background-color: #10B981;
+        }
+
+        .status-error {
+            background-color: #EF4444;
+        }
+    </style>
+</head>
+
+<body
+    class="bg-gray-900 text-white min-h-screen p-6 font-sans bg-[url('https://www.transparenttextures.com/patterns/stardust.png')]">
+
+    <div class="max-w-7xl mx-auto">
+        <header class="flex justify-between items-center mb-8 pb-4 border-b border-gray-800">
+            <div>
+                <h1 class="text-3xl font-bold text-blue-400 flex items-center gap-3">
+                    <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z">
+                        </path>
+                    </svg>
+                    MedScan API Telemetry
+                </h1>
+                <p class="text-gray-400 text-sm mt-1">Real-time usage and performance metrics</p>
+            </div>
+            <div class="text-right">
+                <div class="flex items-center gap-2 justify-end mb-1">
+                    <span class="status-dot status-success animate-pulse"></span>
+                    <span class="text-sm font-medium text-green-400">System Online</span>
+                </div>
+                <div class="text-xs text-gray-500" id="uptimeDisplay">Uptime: Calculating...</div>
+            </div>
+        </header>
+
+        <!-- Top Stats Row -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+            <div class="glass-panel p-5 rounded-xl shadow-lg relative overflow-hidden group">
+                <div
+                    class="absolute inset-0 bg-blue-500/10 translate-y-[100%] group-hover:translate-y-[0%] transition-transform duration-300">
+                </div>
+                <h3 class="text-gray-400 text-sm font-medium uppercase tracking-wider mb-1">Total Requests</h3>
+                <p class="text-4xl font-bold text-white relative z-10" id="statTotalReq">0</p>
+            </div>
+
+            <div class="glass-panel p-5 rounded-xl shadow-lg relative overflow-hidden group">
+                <div
+                    class="absolute inset-0 bg-green-500/10 translate-y-[100%] group-hover:translate-y-[0%] transition-transform duration-300">
+                </div>
+                <h3 class="text-gray-400 text-sm font-medium uppercase tracking-wider mb-1">Overall Success Rate</h3>
+                <p class="text-4xl font-bold text-green-400 relative z-10" id="statSuccessRate">100%</p>
+            </div>
+
+            <div class="glass-panel p-5 rounded-xl shadow-lg relative overflow-hidden group">
+                <div
+                    class="absolute inset-0 bg-yellow-500/10 translate-y-[100%] group-hover:translate-y-[0%] transition-transform duration-300">
+                </div>
+                <h3 class="text-gray-400 text-sm font-medium uppercase tracking-wider mb-1">Avg Response Time</h3>
+                <p class="text-4xl font-bold text-yellow-400 relative z-10 flex items-baseline gap-1">
+                    <span id="statAvgMs">0</span><span class="text-lg">ms</span>
+                </p>
+            </div>
+
+            <div class="glass-panel p-5 rounded-xl shadow-lg relative overflow-hidden group">
+                <div
+                    class="absolute inset-0 bg-purple-500/10 translate-y-[100%] group-hover:translate-y-[0%] transition-transform duration-300">
+                </div>
+                <h3 class="text-gray-400 text-sm font-medium uppercase tracking-wider mb-1">Active Endpoints</h3>
+                <p class="text-4xl font-bold text-purple-400 relative z-10" id="statEndpoints">0</p>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+
+            <!-- Left Column: Endpoint Breakdown -->
+            <div class="lg:col-span-2 space-y-6">
+                <!-- Endpoint Cards -->
+                <div class="glass-panel rounded-xl shadow-lg p-6">
+                    <h2 class="text-xl font-semibold mb-4 text-gray-200">Endpoint Performance</h2>
+                    <div id="endpointContainer" class="space-y-4">
+                        <div class="text-center text-gray-500 py-8">Waiting for API traffic...</div>
+                    </div>
+                </div>
+
+                <!-- Live Request Log -->
+                <div class="glass-panel rounded-xl shadow-lg p-6">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-xl font-semibold text-gray-200">Live Request Log</h2>
+                        <span class="text-xs bg-gray-800 text-gray-400 px-2 py-1 rounded">Last 50</span>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-sm">
+                            <thead class="text-gray-400 border-b border-gray-700">
+                                <tr>
+                                    <th class="pb-2 font-medium">Time</th>
+                                    <th class="pb-2 font-medium">Endpoint</th>
+                                    <th class="pb-2 font-medium">Status</th>
+                                    <th class="pb-2 font-medium text-right">Duration</th>
+                                </tr>
+                            </thead>
+                            <tbody id="logTableBody" class="divide-y divide-gray-800">
+                                <!-- Populated by JS -->
+                            </tbody>
+                        </table>
+                        <div id="logEmptyState" class="text-center text-gray-500 py-6 hidden">No requests logged yet.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column: Charts & Info -->
+            <div class="space-y-6">
+                <!-- Usage Chart -->
+                <div class="glass-panel rounded-xl shadow-lg p-6">
+                    <h2 class="text-lg font-semibold mb-4 text-gray-200">Traffic Distribution</h2>
+                    <div class="relative h-64 flex items-center justify-center">
+                        <canvas id="trafficChart"></canvas>
+                        <div id="chartEmptyText" class="absolute text-gray-500 text-sm">Waiting for data...</div>
+                    </div>
+                </div>
+
+                <!-- System Info Panel -->
+                <div
+                    class="glass-panel rounded-xl shadow-lg p-6 bg-gradient-to-br from-gray-800 to-gray-900 border-blue-900/30">
+                    <h2 class="text-lg font-semibold mb-4 text-gray-200 flex items-center gap-2">
+                        <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10">
+                            </path>
+                        </svg>
+                        System Specs
+                    </h2>
+                    <div class="space-y-3 text-sm">
+                        <div class="flex justify-between border-b border-gray-700/50 pb-2">
+                            <span class="text-gray-400">Models Loaded</span>
+                            <span class="font-medium">ViT, Swin, MedSigLIP</span>
+                        </div>
+                        <div class="flex justify-between border-b border-gray-700/50 pb-2">
+                            <span class="text-gray-400">Framework</span>
+                            <span class="font-medium text-teal-400">FastAPI</span>
+                        </div>
+                        <div class="flex justify-between border-b border-gray-700/50 pb-2">
+                            <span class="text-gray-400">MongoDB Status</span>
+                            <span class="font-medium" id="mongoStatusDisplay">Checking...</span>
+                        </div>
+                        <div class="flex justify-between border-b border-gray-700/50 pb-2">
+                            <span class="text-gray-400">Polling Interval</span>
+                            <span class="font-medium">2 Seconds</span>
+                        </div>
+                        <div class="pt-2 text-center">
+                            <a href="/" class="text-blue-400 hover:text-blue-300 text-xs transition-colors underline">←
+                                Back to Upload Portal</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:8000/api/metrics';
+        let serverStartTime = null;
+        let trafficChart = null;
+
+        // Initialize Chart.js
+        function initChart() {
+            const ctx = document.getElementById('trafficChart').getContext('2d');
+            Chart.defaults.color = '#9CA3AF';
+            Chart.defaults.font.family = 'Inter, sans-serif';
+
+            trafficChart = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        data: [],
+                        backgroundColor: [
+                            'rgba(59, 130, 246, 0.8)', // Blue
+                            'rgba(16, 185, 129, 0.8)', // Green
+                            'rgba(139, 92, 246, 0.8)', // Purple
+                            'rgba(245, 158, 11, 0.8)', // Yellow
+                        ],
+                        borderColor: '#1F2937',
+                        borderWidth: 2,
+                        hoverOffset: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    cutout: '75%',
+                    plugins: {
+                        legend: { position: 'bottom', labels: { boxWidth: 12, padding: 15 } }
+                    }
+                }
+            });
+        }
+
+        function calculateUptime() {
+            if (!serverStartTime) return;
+            const now = new Date();
+            const diffMs = now - serverStartTime;
+
+            const hours = Math.floor(diffMs / 3600000);
+            const mins = Math.floor((diffMs % 3600000) / 60000);
+            const secs = Math.floor((diffMs % 60000) / 1000);
+
+            let timeStr = '';
+            if (hours > 0) timeStr += `${hours}h `;
+            if (mins > 0 || hours > 0) timeStr += `${mins}m `;
+            timeStr += `${secs}s`;
+
+            document.getElementById('uptimeDisplay').textContent = `Uptime: ${timeStr}`;
+        }
+
+        function renderEndpointCard(ep) {
+            // Determine color based on endpoint name
+            let colorClass = "blue";
+            if (ep.endpoint.includes("mri")) colorClass = "purple";
+            else if (ep.endpoint.includes("ct")) colorClass = "green";
+
+            let html = `
+                <div class="bg-gray-800/50 border border-gray-700/50 rounded-lg p-4 flex flex-col sm:flex-row items-center justify-between transition-all hover:bg-gray-800 gap-4">
+                    <div class="flex items-center gap-3 w-full sm:w-auto">
+                        <div class="p-3 bg-${colorClass}-500/10 text-${colorClass}-400 rounded-lg">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                        </div>
+                        <div>
+                            <h3 class="font-mono text-sm text-gray-300 font-bold">${ep.endpoint}</h3>
+                            <div class="flex items-center gap-2 mt-1">
+                                <span class="bg-gray-900 text-gray-400 text-xs px-2 py-0.5 rounded border border-gray-700">${ep.requests} total</span>
+                                ${ep.errors > 0 ? `<span class="bg-red-900/30 text-red-400 text-xs px-2 py-0.5 rounded border border-red-800">${ep.errors} errs</span>` : ''}
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="flex gap-6 w-full sm:w-auto justify-between sm:justify-end border-t border-gray-700 sm:border-0 pt-3 sm:pt-0 mt-2 sm:mt-0">
+                        <div class="text-center">
+                            <p class="text-xs text-gray-500 uppercase">Avg Time</p>
+                            <p class="font-semibold text-gray-200">${ep.avg_ms}ms</p>
+                        </div>
+                        <div class="text-center">
+                            <p class="text-xs text-gray-500 uppercase">Success</p>
+                            <p class="font-semibold ${ep.success_rate < 95 ? 'text-yellow-400' : 'text-green-400'}">${ep.success_rate}%</p>
+                        </div>
+                        <div class="w-16 h-12 flex items-center justify-center">
+                            <!-- Mini sparkline could go here, for now a static visual -->
+                            <div class="h-6 w-full flex items-end justify-between gap-1">
+                                <div class="w-2 bg-${colorClass}-500/40 rounded-t h-1/3"></div>
+                                <div class="w-2 bg-${colorClass}-500/60 rounded-t h-2/3"></div>
+                                <div class="w-2 bg-${colorClass}-500/80 rounded-t h-full"></div>
+                                <div class="w-2 bg-${colorClass}-500/50 rounded-t h-1/2"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            return html;
+        }
+
+        async function fetchMetrics() {
+            try {
+                const res = await fetch(API_URL);
+                if (!res.ok) throw new Error("API Offline");
+                const data = await res.json();
+
+                // Track start time for uptime
+                if (!serverStartTime && data.server_start) {
+                    serverStartTime = new Date(data.server_start);
+                }
+
+                // Update MongoDB Status
+                const mongoStatusElem = document.getElementById('mongoStatusDisplay');
+                if (data.mongodb_status === "Connected") {
+                    mongoStatusElem.textContent = "Connected";
+                    mongoStatusElem.className = "font-medium text-green-400";
+                } else {
+                    mongoStatusElem.textContent = "Disconnected";
+                    mongoStatusElem.className = "font-medium text-red-500";
+                }
+
+                // Top Stats
+                document.getElementById('statTotalReq').textContent = data.total_requests;
+                document.getElementById('statEndpoints').textContent = data.endpoints.length;
+
+                let totalReqs = 0, totalErrors = 0, totalMs = 0;
+                data.endpoints.forEach(ep => {
+                    totalReqs += ep.requests;
+                    totalErrors += ep.errors;
+                    totalMs += (ep.avg_ms * ep.requests);
+                });
+
+                if (totalReqs > 0) {
+                    const sr = Math.round(((totalReqs - totalErrors) / totalReqs) * 100);
+                    const avg = Math.round(totalMs / totalReqs);
+                    document.getElementById('statSuccessRate').textContent = `${sr}%`;
+                    document.getElementById('statSuccessRate').className = `text-4xl font-bold relative z-10 ${sr < 95 ? 'text-yellow-400' : 'text-green-400'}`;
+                    document.getElementById('statAvgMs').textContent = avg;
+                }
+
+                // Endpoints List
+                const epCont = document.getElementById('endpointContainer');
+                if (data.endpoints.length > 0) {
+                    epCont.innerHTML = data.endpoints.sort((a, b) => b.requests - a.requests).map(renderEndpointCard).join('');
+                }
+
+                // Log Table
+                const tbody = document.getElementById('logTableBody');
+                const emptyState = document.getElementById('logEmptyState');
+                if (data.recent.length === 0) {
+                    tbody.innerHTML = '';
+                    emptyState.classList.remove('hidden');
+                } else {
+                    emptyState.classList.add('hidden');
+                    tbody.innerHTML = data.recent.map(req => `
+                        <tr class="hover:bg-gray-800/50 transition-colors">
+                            <td class="py-3 px-2 text-gray-400 font-mono text-xs whitespace-nowrap">${req.time}</td>
+                            <td class="py-3 px-2 text-gray-300 font-medium truncate max-w-[150px] sm:max-w-[300px]" title="${req.endpoint}">${req.endpoint.split('?')[0]}</td>
+                            <td class="py-3 px-2">
+                                <span class="flex items-center gap-1.5 text-xs font-semibold ${req.status === 'success' ? 'text-green-400' : 'text-red-400'}">
+                                    <span class="status-dot ${req.status === 'success' ? 'status-success' : 'status-error'} h-2 w-2"></span>
+                                    ${req.status.toUpperCase()}
+                                </span>
+                            </td>
+                            <td class="py-3 px-2 text-right text-gray-300 font-mono">${req.ms}ms</td>
+                        </tr>
+                    `).join('');
+                }
+
+                // Update Chart
+                if (data.endpoints.length > 0 && trafficChart) {
+                    document.getElementById('chartEmptyText').style.display = 'none';
+                    trafficChart.data.labels = data.endpoints.map(e => e.endpoint.split('/api/')[1] || e.endpoint);
+                    trafficChart.data.datasets[0].data = data.endpoints.map(e => e.requests);
+                    trafficChart.update();
+                }
+
+            } catch (err) {
+                console.error("Fetch error:", err);
+                document.querySelector('.status-dot').className = "status-dot status-error";
+                document.querySelector('.text-green-400.font-medium').textContent = "Connection Lost";
+                document.querySelector('.text-green-400.font-medium').className = "text-sm font-medium text-red-500";
+            }
+        }
+
+        // Initialize and poll
+        initChart();
+        fetchMetrics(); // Fire immediately
+        setInterval(fetchMetrics, 2000); // Fire every 2s
+        setInterval(calculateUptime, 1000); // Update uptime clock every 1s
+    </script>
+</body>
+
+</html>
