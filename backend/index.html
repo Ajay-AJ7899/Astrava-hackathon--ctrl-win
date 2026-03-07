@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Triage Prototype</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body class="bg-gray-900 text-white min-h-screen p-8 font-sans">
+
+    <div class="max-w-6xl mx-auto">
+        <h1 class="text-3xl font-bold mb-2 text-blue-400">Radiology AI Triage - Upload Portal</h1>
+        <p class="text-gray-400 mb-8 text-sm">Powered by ViT (X-Ray) + CLIP (CT Scan) + Llama 3.2</p>
+
+        <!-- Scan Type Toggle -->
+        <div class="flex gap-2 mb-6">
+            <button id="tabXray" onclick="switchTab('xray')"
+                class="px-5 py-2 rounded-full font-semibold text-sm transition duration-200 bg-blue-600 text-white">
+                🫁 Pneumonia X-Ray
+            </button>
+            <button id="tabCt" onclick="switchTab('ct')"
+                class="px-5 py-2 rounded-full font-semibold text-sm transition duration-200 bg-gray-700 text-gray-300 hover:bg-gray-600">
+                🧠 CT Scan
+            </button>
+            <button id="tabMri" onclick="switchTab('mri')"
+                class="px-5 py-2 rounded-full font-semibold text-sm transition duration-200 bg-gray-700 text-gray-300 hover:bg-gray-600">
+                🔬 Brain MRI
+            </button>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+
+            <!-- Input Panel -->
+            <div class="bg-gray-800 p-6 rounded-lg shadow-lg border border-gray-700">
+                <h2 class="text-xl font-semibold mb-4 border-b border-gray-700 pb-2">New Patient Intake</h2>
+
+                <form id="triageForm" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-1">Patient Name</label>
+                        <input type="text" id="patientName" required
+                            class="w-full bg-gray-700 border border-gray-600 rounded p-2 text-white focus:ring-blue-500 focus:border-blue-500"
+                            placeholder="e.g., John Doe">
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium mb-1">Clinical Notes & Labs</label>
+                        <textarea id="labNotes" required rows="4"
+                            class="w-full bg-gray-700 border border-gray-600 rounded p-2 text-white focus:ring-blue-500 focus:border-blue-500"
+                            placeholder="e.g., Patient presents with severe chest pain, O2 sat 88%, coughing blood."></textarea>
+                    </div>
+
+                    <!-- X-Ray file input -->
+                    <div id="xrayUpload">
+                        <label class="block text-sm font-medium mb-1">Upload X-Ray (JPEG/PNG)</label>
+                        <input type="file" id="xrayFile" accept="image/*"
+                            class="w-full bg-gray-700 border border-gray-600 rounded p-2 text-white">
+                    </div>
+
+                    <!-- CT Scan file input (hidden by default) -->
+                    <div id="ctUpload" class="hidden">
+                        <label class="block text-sm font-medium mb-1">Upload CT Scan (JPEG/PNG)</label>
+                        <input type="file" id="ctFile" accept="image/*"
+                            class="w-full bg-gray-700 border border-gray-600 rounded p-2 text-white">
+                    </div>
+
+                    <!-- Brain MRI file input (hidden by default) -->
+                    <div id="mriUpload" class="hidden">
+                        <label class="block text-sm font-medium mb-1">Upload Brain MRI (JPEG/PNG)</label>
+                        <input type="file" id="mriFile" accept="image/*"
+                            class="w-full bg-gray-700 border border-gray-600 rounded p-2 text-white">
+                    </div>
+
+                    <button type="submit" id="submitBtn"
+                        class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition duration-200">
+                        Run AI Triage Analysis
+                    </button>
+                </form>
+            </div>
+
+            <!-- Results Panel -->
+            <div class="bg-gray-800 p-6 rounded-lg shadow-lg border border-gray-700 flex flex-col justify-center items-center"
+                id="resultsPanel">
+
+                <div id="idleState" class="text-center text-gray-400">
+                    <svg class="w-16 h-16 mx-auto mb-4 opacity-50" fill="none" stroke="currentColor"
+                        viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z">
+                        </path>
+                    </svg>
+                    <p>Awaiting patient data...</p>
+                </div>
+
+                <div id="loadingState" class="hidden text-center text-blue-400">
+                    <svg class="animate-spin w-12 h-12 mx-auto mb-4" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4">
+                        </circle>
+                        <path class="opacity-75" fill="currentColor"
+                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
+                        </path>
+                    </svg>
+                    <p id="loadingMsg">Running multi-modal analysis...</p>
+                </div>
+
+                <div id="activeState" class="hidden w-full">
+                    <div class="flex justify-between items-center border-b border-gray-700 pb-4 mb-4">
+                        <div>
+                            <h2 class="text-2xl font-bold" id="resName">Patient Name</h2>
+                            <span id="resScanType" class="text-xs text-gray-400 uppercase tracking-wide"></span>
+                        </div>
+                        <span id="resStatus"
+                            class="bg-green-900 text-green-300 py-1 px-3 rounded-full text-sm font-bold">Status</span>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4 mb-6">
+                        <div class="bg-gray-700 p-4 rounded text-center">
+                            <p class="text-xs text-gray-400 uppercase tracking-wide">Image Anomaly</p>
+                            <p class="text-3xl font-bold text-blue-400" id="resImage">0%</p>
+                        </div>
+                        <div class="bg-gray-700 p-4 rounded text-center">
+                            <p class="text-xs text-gray-400 uppercase tracking-wide">Lab Severity</p>
+                            <p class="text-3xl font-bold text-red-400"><span id="resLab">0</span>/10</p>
+                        </div>
+                    </div>
+
+                    <div class="bg-gray-900 p-4 rounded mb-6 border border-gray-700">
+                        <p class="text-xs text-gray-400 uppercase tracking-wide mb-2">Final Priority Score</p>
+                        <p class="text-5xl font-black text-center text-yellow-400" id="resPriority">0.00</p>
+                    </div>
+
+                    <div>
+                        <p class="text-sm text-gray-400 uppercase tracking-wide mb-2">Critical Flags Detected</p>
+                        <ul id="resFlags"
+                            class="list-disc list-inside text-red-300 text-sm space-y-1 bg-red-900/20 p-3 rounded border border-red-900">
+                        </ul>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentTab = 'xray';
+
+        function switchTab(tab) {
+            currentTab = tab;
+            const tabs = { xray: 'tabXray', ct: 'tabCt', mri: 'tabMri' };
+            const uploads = { xray: 'xrayUpload', ct: 'ctUpload', mri: 'mriUpload' };
+
+            // Reset all tabs
+            Object.values(tabs).forEach(id => {
+                document.getElementById(id).classList.replace('bg-blue-600', 'bg-gray-700');
+                document.getElementById(id).classList.replace('text-white', 'text-gray-300');
+            });
+            Object.values(uploads).forEach(id => document.getElementById(id).classList.add('hidden'));
+
+            // Activate selected
+            document.getElementById(tabs[tab]).classList.replace('bg-gray-700', 'bg-blue-600');
+            document.getElementById(tabs[tab]).classList.replace('text-gray-300', 'text-white');
+            document.getElementById(uploads[tab]).classList.remove('hidden');
+        }
+
+        document.getElementById('triageForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            // UI State
+            document.getElementById('idleState').classList.add('hidden');
+            document.getElementById('activeState').classList.add('hidden');
+            document.getElementById('loadingState').classList.remove('hidden');
+            document.getElementById('submitBtn').disabled = true;
+
+            const formData = new FormData();
+            formData.append('patient_name', document.getElementById('patientName').value);
+            formData.append('lab_notes', document.getElementById('labNotes').value);
+
+            let endpoint;
+            if (currentTab === 'xray') {
+                const file = document.getElementById('xrayFile').files[0];
+                if (!file) { alert('Please upload an X-Ray image.'); resetUI(); return; }
+                formData.append('xray_file', file);
+                endpoint = 'http://localhost:8000/api/pneumonia-xray';
+                document.getElementById('loadingMsg').textContent = 'Analysing X-Ray with ViT model...';
+            } else if (currentTab === 'ct') {
+                const file = document.getElementById('ctFile').files[0];
+                if (!file) { alert('Please upload a CT Scan image.'); resetUI(); return; }
+                formData.append('ct_file', file);
+                endpoint = 'http://localhost:8000/api/ct-scan';
+                document.getElementById('loadingMsg').textContent = 'Analysing CT Scan with Swin model...';
+            } else {
+                const file = document.getElementById('mriFile').files[0];
+                if (!file) { alert('Please upload a Brain MRI image.'); resetUI(); return; }
+                formData.append('mri_file', file);
+                endpoint = 'http://localhost:8000/api/brain-mri';
+                document.getElementById('loadingMsg').textContent = 'Analysing Brain MRI with ViT tumor model...';
+            }
+
+            try {
+                const response = await fetch(endpoint, { method: 'POST', body: formData });
+                const data = await response.json();
+
+                document.getElementById('resName').textContent = data.patient;
+                document.getElementById('resStatus').textContent = data.status;
+                document.getElementById('resScanType').textContent = data.scan_type ? `Scan: ${data.scan_type}` : 'Scan: X-Ray';
+                document.getElementById('resImage').textContent = data.image_anomaly_confidence + '%';
+                document.getElementById('resLab').textContent = data.lab_severity;
+                document.getElementById('resPriority').textContent = data.final_priority_score;
+
+                const flagsContainer = document.getElementById('resFlags');
+                flagsContainer.innerHTML = '';
+                data.critical_flags.forEach(flag => {
+                    const li = document.createElement('li');
+                    li.textContent = flag;
+                    flagsContainer.appendChild(li);
+                });
+
+                document.getElementById('loadingState').classList.add('hidden');
+                document.getElementById('activeState').classList.remove('hidden');
+
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Failed to connect to the backend. Is FastAPI running on port 8000?');
+                document.getElementById('loadingState').classList.add('hidden');
+                document.getElementById('idleState').classList.remove('hidden');
+            } finally {
+                document.getElementById('submitBtn').disabled = false;
+            }
+        });
+
+        function resetUI() {
+            document.getElementById('loadingState').classList.add('hidden');
+            document.getElementById('idleState').classList.remove('hidden');
+            document.getElementById('submitBtn').disabled = false;
+        }
+    </script>
+</body>
+
+</html>
